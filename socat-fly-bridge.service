@@ -1,0 +1,13 @@
+[Unit]
+Description=socat bridge: Fly 6PN IPv6 → Shore IPv4
+After=wg-quick@wg-fly.service
+Wants=wg-quick@wg-fly.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/socat TCP6-LISTEN:7779,bind=[::],reuseaddr,fork TCP4:127.0.0.1:7778
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
