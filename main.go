@@ -138,6 +138,9 @@ func main() {
 		log.Fatalf("Failed to read embedded login page: %v", err)
 	}
 
+	// Serve static assets (logo, etc.) without auth — needed for login page
+	mux.Handle("/static/", http.FileServer(http.FS(staticFiles)))
+
 	// Everything else goes through basic auth + proxy
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Basic auth check

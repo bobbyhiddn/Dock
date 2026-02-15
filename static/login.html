@@ -91,7 +91,7 @@
             }
         }
 
-        /* Hermit Crab Logo */
+        /* Hermit Dock Logo */
         .logo-wrap {
             display: flex;
             flex-direction: column;
@@ -100,8 +100,8 @@
         }
 
         .logo {
-            width: 72px;
-            height: 72px;
+            width: 120px;
+            height: 120px;
             margin-bottom: 1rem;
             animation: logoFloat 6s ease-in-out infinite;
         }
@@ -111,9 +111,11 @@
             50% { transform: translateY(-4px); }
         }
 
-        .logo svg {
+        .logo img {
             width: 100%;
             height: 100%;
+            object-fit: contain;
+            filter: brightness(0.85) sepia(0.2);
         }
 
         .brand-title {
@@ -291,61 +293,7 @@
         <div class="login-card">
             <div class="logo-wrap">
                 <div class="logo">
-                    <!-- Hermit Crab Shell SVG — gold and warm brown -->
-                    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-                        <!-- Shell spiral -->
-                        <path d="M50 20 C70 20, 82 35, 82 50 C82 68, 68 82, 50 82 C35 82, 22 72, 22 58 C22 46, 32 36, 42 36 C52 36, 60 44, 60 52 C60 60, 54 66, 48 66 C42 66, 38 62, 38 56 C38 52, 41 48, 46 48"
-                              fill="none" stroke="#c4a66a" stroke-width="3" stroke-linecap="round"
-                              opacity="0.9">
-                            <animate attributeName="stroke-dasharray" from="0 300" to="300 0" dur="1.5s" fill="freeze" />
-                        </path>
-                        <!-- Shell inner highlight -->
-                        <path d="M46 48 C43 48, 40 52, 42 55"
-                              fill="none" stroke="#d4b87a" stroke-width="2" stroke-linecap="round" opacity="0.5">
-                            <animate attributeName="stroke-dasharray" from="0 50" to="50 0" dur="1.5s" begin="0.8s" fill="freeze" />
-                        </path>
-                        <!-- Crab legs — left -->
-                        <line x1="30" y1="70" x2="15" y2="80" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
-                            <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.2s" fill="freeze" />
-                        </line>
-                        <line x1="26" y1="74" x2="12" y2="72" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
-                            <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.3s" fill="freeze" />
-                        </line>
-                        <line x1="24" y1="66" x2="10" y2="62" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.6">
-                            <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.4s" fill="freeze" />
-                        </line>
-                        <!-- Crab legs — right -->
-                        <line x1="68" y1="72" x2="83" y2="82" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
-                            <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.2s" fill="freeze" />
-                        </line>
-                        <line x1="72" y1="76" x2="88" y2="74" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
-                            <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.3s" fill="freeze" />
-                        </line>
-                        <line x1="74" y1="68" x2="90" y2="64" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.6">
-                            <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.4s" fill="freeze" />
-                        </line>
-                        <!-- Crab claws -->
-                        <path d="M18 80 C14 84, 10 82, 12 78" fill="none" stroke="#a09080" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
-                            <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.3s" begin="1.5s" fill="freeze" />
-                        </path>
-                        <path d="M86 82 C90 86, 94 84, 92 80" fill="none" stroke="#a09080" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
-                            <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.3s" begin="1.5s" fill="freeze" />
-                        </path>
-                        <!-- Eyes -->
-                        <circle cx="36" cy="30" r="3" fill="#c4a66a" opacity="0.8">
-                            <animate attributeName="opacity" from="0" to="0.8" dur="0.3s" begin="1.6s" fill="freeze" />
-                        </circle>
-                        <circle cx="56" cy="26" r="3" fill="#c4a66a" opacity="0.8">
-                            <animate attributeName="opacity" from="0" to="0.8" dur="0.3s" begin="1.6s" fill="freeze" />
-                        </circle>
-                        <!-- Eye stalks -->
-                        <line x1="36" y1="36" x2="36" y2="32" stroke="#a09080" stroke-width="1.5" stroke-linecap="round" opacity="0.6">
-                            <animate attributeName="stroke-dasharray" from="0 10" to="10 0" dur="0.2s" begin="1.5s" fill="freeze" />
-                        </line>
-                        <line x1="54" y1="34" x2="56" y2="28" stroke="#a09080" stroke-width="1.5" stroke-linecap="round" opacity="0.6">
-                            <animate attributeName="stroke-dasharray" from="0 10" to="10 0" dur="0.2s" begin="1.5s" fill="freeze" />
-                        </line>
-                    </svg>
+                    <img src="/static/dock-logo.png" alt="Hermit Dock">
                 </div>
                 <div class="brand-title">Hermit</div>
                 <div class="brand-sub">Secure Gateway</div>
