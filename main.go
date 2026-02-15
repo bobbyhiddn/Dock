@@ -1,8 +1,12 @@
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -72,6 +76,59 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// generateSessionSecret creates a random 32-byte secret for HMAC signing
+func generateSessionSecret() []byte {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		log.Fatalf("Failed to generate session secret: %v", err)
+	}
+	return secret
+}
+
+// createSessionToken creates an HMAC-signed session token
+// Format: timestamp_hex.hmac_hex
+func createSessionToken(secret []byte) string {
+	ts := fmt.Sprintf("%d", time.Now().Unix())
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(ts))
+	sig := hex.EncodeToString(mac.Sum(nil))
+	return ts + "." + sig
+}
+
+// validateSessionToken checks that the token is validly signed and not expired
+func validateSessionToken(token string, secret []byte, maxAge time.Duration) bool {
+	// Split into timestamp.signature
+	var ts, sig string
+	for i := len(token) - 1; i >= 0; i-- {
+		if token[i] == '.' {
+			ts = token[:i]
+			sig = token[i+1:]
+			break
+		}
+	}
+	if ts == "" || sig == "" {
+		return false
+	}
+
+	// Verify HMAC
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(ts))
+	expected := hex.EncodeToString(mac.Sum(nil))
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+		return false
+	}
+
+	// Check expiry
+	var tsInt int64
+	fmt.Sscanf(ts, "%d", &tsInt)
+	issued := time.Unix(tsInt, 0)
+	if time.Since(issued) > maxAge {
+		return false
+	}
+
+	return true
+}
+
 func main() {
 	upstreamURL := os.Getenv("UPSTREAM_URL")
 	if upstreamURL == "" {
@@ -89,6 +146,11 @@ func main() {
 		port = "8080"
 	}
 
+	// Session config
+	sessionSecret := generateSessionSecret()
+	sessionMaxAge := 24 * time.Hour * 7 // 7-day sessions
+	cookieName := "hermit_session"
+
 	target, err := url.Parse(upstreamURL)
 	if err != nil {
 		log.Fatalf("Invalid UPSTREAM_URL: %v", err)
@@ -97,19 +159,11 @@ func main() {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
 	// Customize the director to rewrite Host and set forwarding headers.
-	// NOTE: httputil.NewSingleHostReverseProxy's default Director already
-	// appends the client IP to X-Forwarded-For. We call it first, then
-	// set X-Real-IP with the original client IP for downstream consumers.
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
-		// Save client IP before originalDirector potentially modifies things
 		clientIP := extractClientIP(req.RemoteAddr)
-
-		// Default director sets scheme, host, path, and appends X-Forwarded-For
 		originalDirector(req)
 		req.Host = target.Host
-
-		// Set X-Real-IP with the direct client IP (Fly edge → this proxy)
 		req.Header.Set("X-Real-IP", clientIP)
 	}
 
@@ -125,52 +179,101 @@ func main() {
 		http.Error(w, "Upstream unreachable", http.StatusBadGateway)
 	}
 
-	// Health check endpoint (no auth required)
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
-	})
-
 	// Read the login page from embedded static files
 	loginPage, err := staticFiles.ReadFile("static/login.html")
 	if err != nil {
 		log.Fatalf("Failed to read embedded login page: %v", err)
 	}
 
+	mux := http.NewServeMux()
+
+	// Health check endpoint (no auth required)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "ok")
+	})
+
 	// Serve static assets (logo, etc.) without auth — needed for login page
 	mux.Handle("/static/", http.FileServer(http.FS(staticFiles)))
 
-	// Everything else goes through basic auth + proxy
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Basic auth check
-		user, pass, ok := r.BasicAuth()
-		if !ok ||
-			subtle.ConstantTimeCompare([]byte(user), []byte(username)) != 1 ||
-			subtle.ConstantTimeCompare([]byte(pass), []byte(password)) != 1 {
-
-			// If this is a login check from the JS form, return 401 (no redirect)
-			if r.Header.Get("X-Login-Check") == "1" {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-
-			// For browser GET requests without auth, serve the login page
-			if r.Method == http.MethodGet || r.Method == http.MethodHead {
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.Header().Set("Cache-Control", "no-store")
-				w.WriteHeader(http.StatusOK)
-				w.Write(loginPage)
-				return
-			}
-
-			// For API/non-browser requests, return 401
-			w.Header().Set("WWW-Authenticate", `Basic realm="hermit-dock"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+	// POST /login — validate credentials and set session cookie
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		proxy.ServeHTTP(w, r)
+		r.ParseForm()
+		user := r.FormValue("username")
+		pass := r.FormValue("password")
+
+		if subtle.ConstantTimeCompare([]byte(user), []byte(username)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(pass), []byte(password)) != 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprintln(w, "invalid")
+			return
+		}
+
+		// Credentials valid — set session cookie
+		token := createSessionToken(sessionSecret)
+		http.SetCookie(w, &http.Cookie{
+			Name:     cookieName,
+			Value:    token,
+			Path:     "/",
+			MaxAge:   int(sessionMaxAge.Seconds()),
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteLaxMode,
+		})
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "ok")
+	})
+
+	// GET /logout — clear session cookie
+	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     cookieName,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteLaxMode,
+		})
+		http.Redirect(w, r, "/", http.StatusFound)
+	})
+
+	// Everything else goes through session check + proxy
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Check session cookie first
+		cookie, err := r.Cookie(cookieName)
+		if err == nil && validateSessionToken(cookie.Value, sessionSecret, sessionMaxAge) {
+			// Valid session — proxy the request
+			proxy.ServeHTTP(w, r)
+			return
+		}
+
+		// Also accept Basic auth (for API clients, curl, etc.)
+		user, pass, ok := r.BasicAuth()
+		if ok &&
+			subtle.ConstantTimeCompare([]byte(user), []byte(username)) == 1 &&
+			subtle.ConstantTimeCompare([]byte(pass), []byte(password)) == 1 {
+			proxy.ServeHTTP(w, r)
+			return
+		}
+
+		// Not authenticated — serve login page for browsers, 401 for API
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			w.Write(loginPage)
+			return
+		}
+
+		w.Header().Set("WWW-Authenticate", `Basic realm="hermit-dock"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	})
 
 	// Wrap the entire mux with the logging middleware

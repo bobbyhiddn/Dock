@@ -341,24 +341,17 @@
             btn.disabled = true;
 
             try {
-                // Test credentials with a HEAD request
-                const creds = btoa(user + ':' + pass);
-                const resp = await fetch('/', {
-                    method: 'HEAD',
-                    headers: {
-                        'Authorization': 'Basic ' + creds,
-                        'X-Login-Check': '1'
-                    }
+                // POST credentials to /login — server sets a session cookie
+                const body = new URLSearchParams({ username: user, password: pass });
+                const resp = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body
                 });
 
-                if (resp.ok || resp.status === 302 || resp.status === 304) {
-                    // Credentials valid — set in URL for browser session persistence
-                    const loc = window.location;
-                    const authUrl = loc.protocol + '//' +
-                                    encodeURIComponent(user) + ':' +
-                                    encodeURIComponent(pass) + '@' +
-                                    loc.host + '/';
-                    window.location.href = authUrl;
+                if (resp.ok) {
+                    // Cookie is set — reload to enter authenticated session
+                    window.location.reload();
                 } else {
                     // Invalid credentials
                     err.classList.add('visible');
