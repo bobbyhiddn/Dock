@@ -4,30 +4,31 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hermit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        /* Catppuccin Mocha Palette */
+        /* Hermit Brand Palette — warm earth tones */
         :root {
-            --base: #1e1e2e;
-            --mantle: #181825;
-            --crust: #11111b;
-            --surface0: #313244;
-            --surface1: #45475a;
-            --surface2: #585b70;
-            --overlay0: #6c7086;
-            --overlay1: #7f849c;
-            --subtext0: #a6adc8;
-            --subtext1: #bac2de;
-            --text: #cdd6f4;
-            --lavender: #b4befe;
-            --blue: #89b4fa;
-            --sapphire: #74c7ec;
-            --mauve: #cba6f7;
-            --pink: #f5c2e7;
-            --red: #f38ba8;
-            --peach: #fab387;
-            --yellow: #f9e2af;
-            --green: #a6e3a1;
-            --teal: #94e2d5;
+            --bg-base: #1a1410;
+            --bg-surface: #252019;
+            --bg-overlay: #2e2820;
+            --bg-raised: #362f26;
+            --bg-input: #1a1410;
+            --border: #4a3f35;
+            --border-focus: #c4a66a;
+            --accent: #c4a66a;
+            --accent-hover: #d4b87a;
+            --accent-glow: rgba(196, 166, 106, 0.2);
+            --text-primary: #e8dcc8;
+            --text-muted: #8b7d6b;
+            --text-subtle: #a09080;
+            --text-on-accent: #1a1410;
+            --red: #8b3a3a;
+            --red-bg: rgba(139, 58, 58, 0.15);
+            --red-border: rgba(139, 58, 58, 0.4);
+            --red-text: #c06060;
+            --teal: #4a6670;
         }
 
         * {
@@ -38,8 +39,8 @@
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: var(--base);
-            color: var(--text);
+            background: var(--bg-base);
+            color: var(--text-primary);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -47,15 +48,15 @@
             overflow: hidden;
         }
 
-        /* Subtle animated background grid */
+        /* Subtle warm ambient glow */
         body::before {
             content: '';
             position: fixed;
             inset: 0;
             background-image:
-                radial-gradient(circle at 20% 50%, rgba(203, 166, 247, 0.03) 0%, transparent 50%),
-                radial-gradient(circle at 80% 20%, rgba(137, 180, 250, 0.03) 0%, transparent 50%),
-                radial-gradient(circle at 50% 80%, rgba(180, 190, 254, 0.02) 0%, transparent 50%);
+                radial-gradient(ellipse at 30% 40%, rgba(196, 166, 106, 0.04) 0%, transparent 60%),
+                radial-gradient(ellipse at 70% 60%, rgba(74, 102, 112, 0.03) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 90%, rgba(196, 166, 106, 0.02) 0%, transparent 40%);
             z-index: 0;
         }
 
@@ -68,13 +69,14 @@
         }
 
         .login-card {
-            background: var(--surface0);
-            border: 1px solid var(--surface1);
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
             border-radius: 16px;
             padding: 2.5rem 2rem 2rem;
             box-shadow:
-                0 4px 24px rgba(0, 0, 0, 0.3),
-                0 1px 3px rgba(0, 0, 0, 0.2);
+                0 4px 32px rgba(0, 0, 0, 0.4),
+                0 1px 4px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(196, 166, 106, 0.04);
             animation: cardSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
@@ -89,7 +91,7 @@
             }
         }
 
-        /* Hermit Crab Logo — SVG */
+        /* Hermit Crab Logo */
         .logo-wrap {
             display: flex;
             flex-direction: column;
@@ -118,14 +120,15 @@
             font-size: 1.75rem;
             font-weight: 700;
             letter-spacing: 0.05em;
-            color: var(--text);
+            color: var(--accent);
             margin-bottom: 0.25rem;
         }
 
         .brand-sub {
             font-size: 0.8rem;
-            color: var(--subtext0);
-            letter-spacing: 0.08em;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+            letter-spacing: 0.1em;
             text-transform: uppercase;
         }
 
@@ -136,55 +139,57 @@
 
         .form-label {
             display: block;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             font-weight: 500;
-            color: var(--subtext0);
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
             text-transform: uppercase;
-            letter-spacing: 0.06em;
+            letter-spacing: 0.08em;
             margin-bottom: 0.5rem;
         }
 
         .form-input {
             width: 100%;
             padding: 0.75rem 1rem;
-            background: var(--base);
-            border: 1px solid var(--surface1);
+            background: var(--bg-input);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            color: var(--text);
+            color: var(--text-primary);
             font-size: 0.95rem;
-            font-family: inherit;
+            font-family: 'Inter', sans-serif;
             transition: border-color 0.2s, box-shadow 0.2s;
             outline: none;
         }
 
         .form-input::placeholder {
-            color: var(--overlay0);
+            color: var(--text-muted);
+            opacity: 0.6;
         }
 
         .form-input:focus {
-            border-color: var(--mauve);
-            box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.15);
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--accent-glow);
         }
 
         .submit-btn {
             width: 100%;
             padding: 0.8rem 1.5rem;
             margin-top: 0.5rem;
-            background: var(--mauve);
-            color: var(--crust);
+            background: var(--accent);
+            color: var(--text-on-accent);
             border: none;
             border-radius: 8px;
             font-size: 0.95rem;
             font-weight: 600;
-            font-family: inherit;
+            font-family: 'Inter', sans-serif;
             cursor: pointer;
             transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
             letter-spacing: 0.02em;
         }
 
         .submit-btn:hover {
-            background: var(--lavender);
-            box-shadow: 0 4px 16px rgba(203, 166, 247, 0.25);
+            background: var(--accent-hover);
+            box-shadow: 0 4px 16px var(--accent-glow);
         }
 
         .submit-btn:active {
@@ -201,10 +206,10 @@
             display: none;
             padding: 0.6rem 0.8rem;
             margin-bottom: 1rem;
-            background: rgba(243, 139, 168, 0.1);
-            border: 1px solid rgba(243, 139, 168, 0.3);
+            background: var(--red-bg);
+            border: 1px solid var(--red-border);
             border-radius: 8px;
-            color: var(--red);
+            color: var(--red-text);
             font-size: 0.85rem;
             text-align: center;
             animation: errorShake 0.4s ease-in-out;
@@ -226,15 +231,17 @@
         .login-footer {
             text-align: center;
             margin-top: 1.5rem;
-            font-size: 0.75rem;
-            color: var(--overlay0);
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+            letter-spacing: 0.04em;
         }
 
         .login-footer .dot {
             display: inline-block;
-            width: 5px;
-            height: 5px;
-            background: var(--mauve);
+            width: 4px;
+            height: 4px;
+            background: var(--accent);
             border-radius: 50%;
             margin: 0 0.4rem;
             vertical-align: middle;
@@ -264,7 +271,7 @@
             display: none;
             width: 18px;
             height: 18px;
-            border: 2px solid var(--crust);
+            border: 2px solid var(--text-on-accent);
             border-top-color: transparent;
             border-radius: 50%;
             animation: spin 0.6s linear infinite;
@@ -284,58 +291,58 @@
         <div class="login-card">
             <div class="logo-wrap">
                 <div class="logo">
-                    <!-- Hermit Crab Shell SVG -->
+                    <!-- Hermit Crab Shell SVG — gold and warm brown -->
                     <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
                         <!-- Shell spiral -->
                         <path d="M50 20 C70 20, 82 35, 82 50 C82 68, 68 82, 50 82 C35 82, 22 72, 22 58 C22 46, 32 36, 42 36 C52 36, 60 44, 60 52 C60 60, 54 66, 48 66 C42 66, 38 62, 38 56 C38 52, 41 48, 46 48"
-                              fill="none" stroke="#cba6f7" stroke-width="3" stroke-linecap="round"
+                              fill="none" stroke="#c4a66a" stroke-width="3" stroke-linecap="round"
                               opacity="0.9">
                             <animate attributeName="stroke-dasharray" from="0 300" to="300 0" dur="1.5s" fill="freeze" />
                         </path>
                         <!-- Shell inner highlight -->
                         <path d="M46 48 C43 48, 40 52, 42 55"
-                              fill="none" stroke="#b4befe" stroke-width="2" stroke-linecap="round" opacity="0.5">
+                              fill="none" stroke="#d4b87a" stroke-width="2" stroke-linecap="round" opacity="0.5">
                             <animate attributeName="stroke-dasharray" from="0 50" to="50 0" dur="1.5s" begin="0.8s" fill="freeze" />
                         </path>
                         <!-- Crab legs — left -->
-                        <line x1="30" y1="70" x2="15" y2="80" stroke="#89b4fa" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
+                        <line x1="30" y1="70" x2="15" y2="80" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
                             <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.2s" fill="freeze" />
                         </line>
-                        <line x1="26" y1="74" x2="12" y2="72" stroke="#89b4fa" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
+                        <line x1="26" y1="74" x2="12" y2="72" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
                             <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.3s" fill="freeze" />
                         </line>
-                        <line x1="24" y1="66" x2="10" y2="62" stroke="#89b4fa" stroke-width="2.5" stroke-linecap="round" opacity="0.6">
+                        <line x1="24" y1="66" x2="10" y2="62" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.6">
                             <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.4s" fill="freeze" />
                         </line>
                         <!-- Crab legs — right -->
-                        <line x1="68" y1="72" x2="83" y2="82" stroke="#89b4fa" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
+                        <line x1="68" y1="72" x2="83" y2="82" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
                             <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.2s" fill="freeze" />
                         </line>
-                        <line x1="72" y1="76" x2="88" y2="74" stroke="#89b4fa" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
+                        <line x1="72" y1="76" x2="88" y2="74" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
                             <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.3s" fill="freeze" />
                         </line>
-                        <line x1="74" y1="68" x2="90" y2="64" stroke="#89b4fa" stroke-width="2.5" stroke-linecap="round" opacity="0.6">
+                        <line x1="74" y1="68" x2="90" y2="64" stroke="#8b7d6b" stroke-width="2.5" stroke-linecap="round" opacity="0.6">
                             <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.4s" begin="1.4s" fill="freeze" />
                         </line>
                         <!-- Crab claws -->
-                        <path d="M18 80 C14 84, 10 82, 12 78" fill="none" stroke="#89b4fa" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
+                        <path d="M18 80 C14 84, 10 82, 12 78" fill="none" stroke="#a09080" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
                             <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.3s" begin="1.5s" fill="freeze" />
                         </path>
-                        <path d="M86 82 C90 86, 94 84, 92 80" fill="none" stroke="#89b4fa" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
+                        <path d="M86 82 C90 86, 94 84, 92 80" fill="none" stroke="#a09080" stroke-width="2.5" stroke-linecap="round" opacity="0.7">
                             <animate attributeName="stroke-dasharray" from="0 30" to="30 0" dur="0.3s" begin="1.5s" fill="freeze" />
                         </path>
                         <!-- Eyes -->
-                        <circle cx="36" cy="30" r="3" fill="#89b4fa" opacity="0.8">
+                        <circle cx="36" cy="30" r="3" fill="#c4a66a" opacity="0.8">
                             <animate attributeName="opacity" from="0" to="0.8" dur="0.3s" begin="1.6s" fill="freeze" />
                         </circle>
-                        <circle cx="56" cy="26" r="3" fill="#89b4fa" opacity="0.8">
+                        <circle cx="56" cy="26" r="3" fill="#c4a66a" opacity="0.8">
                             <animate attributeName="opacity" from="0" to="0.8" dur="0.3s" begin="1.6s" fill="freeze" />
                         </circle>
                         <!-- Eye stalks -->
-                        <line x1="36" y1="36" x2="36" y2="32" stroke="#89b4fa" stroke-width="1.5" stroke-linecap="round" opacity="0.6">
+                        <line x1="36" y1="36" x2="36" y2="32" stroke="#a09080" stroke-width="1.5" stroke-linecap="round" opacity="0.6">
                             <animate attributeName="stroke-dasharray" from="0 10" to="10 0" dur="0.2s" begin="1.5s" fill="freeze" />
                         </line>
-                        <line x1="54" y1="34" x2="56" y2="28" stroke="#89b4fa" stroke-width="1.5" stroke-linecap="round" opacity="0.6">
+                        <line x1="54" y1="34" x2="56" y2="28" stroke="#a09080" stroke-width="1.5" stroke-linecap="round" opacity="0.6">
                             <animate attributeName="stroke-dasharray" from="0 10" to="10 0" dur="0.2s" begin="1.5s" fill="freeze" />
                         </line>
                     </svg>
@@ -397,9 +404,7 @@
                 });
 
                 if (resp.ok || resp.status === 302 || resp.status === 304) {
-                    // Credentials valid — store and redirect
-                    // Set credentials in the URL to persist the Basic auth session
-                    // Modern browsers will remember the auth for the session
+                    // Credentials valid — set in URL for browser session persistence
                     const loc = window.location;
                     const authUrl = loc.protocol + '//' +
                                     encodeURIComponent(user) + ':' +
@@ -411,7 +416,6 @@
                     err.classList.add('visible');
                     btn.classList.remove('loading');
                     btn.disabled = false;
-                    // Shake the password field
                     document.getElementById('password').focus();
                     document.getElementById('password').select();
                 }
