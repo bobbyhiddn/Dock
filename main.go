@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/subtle"
+	"embed"
 	"fmt"
 	"log"
 	"net"
@@ -11,6 +12,9 @@ import (
 	"os"
 	"time"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 // statusResponseWriter wraps http.ResponseWriter to capture the status code
 type statusResponseWriter struct {
@@ -128,6 +132,12 @@ func main() {
 		fmt.Fprintln(w, "ok")
 	})
 
+	// Read the login page from embedded static files
+	loginPage, err := staticFiles.ReadFile("static/login.html")
+	if err != nil {
+		log.Fatalf("Failed to read embedded login page: %v", err)
+	}
+
 	// Everything else goes through basic auth + proxy
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Basic auth check
@@ -135,6 +145,23 @@ func main() {
 		if !ok ||
 			subtle.ConstantTimeCompare([]byte(user), []byte(username)) != 1 ||
 			subtle.ConstantTimeCompare([]byte(pass), []byte(password)) != 1 {
+
+			// If this is a login check from the JS form, return 401 (no redirect)
+			if r.Header.Get("X-Login-Check") == "1" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			// For browser GET requests without auth, serve the login page
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusOK)
+				w.Write(loginPage)
+				return
+			}
+
+			// For API/non-browser requests, return 401
 			w.Header().Set("WWW-Authenticate", `Basic realm="hermit-dock"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
