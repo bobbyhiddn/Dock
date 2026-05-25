@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermit — Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #1a1410;
+            --bg-surface: #252019;
+            --bg-overlay: #2e2820;
+            --bg-raised: #362f26;
+            --bg-input: #1a1410;
+            --border: #4a3f35;
+            --border-focus: #c4a66a;
+            --accent: #c4a66a;
+            --accent-hover: #d4b87a;
+            --accent-glow: rgba(196, 166, 106, 0.2);
+            --text-primary: #e8dcc8;
+            --text-muted: #8b7d6b;
+            --text-subtle: #a09080;
+            --text-on-accent: #1a1410;
+            --teal: #4a6670;
+            --teal-bg: rgba(74, 102, 112, 0.15);
+            --teal-border: rgba(74, 102, 112, 0.4);
+            --green: #5a7a5a;
+            --green-bg: rgba(90, 122, 90, 0.15);
+            --green-border: rgba(90, 122, 90, 0.4);
+            --green-text: #7aaa7a;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image:
+                radial-gradient(ellipse at 20% 20%, rgba(196, 166, 106, 0.04) 0%, transparent 55%),
+                radial-gradient(ellipse at 80% 80%, rgba(74, 102, 112, 0.03) 0%, transparent 50%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        /* ── Topbar ── */
+        .topbar {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: rgba(26, 20, 16, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            padding: 0 2rem;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .topbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .topbar-logo {
+            width: 32px;
+            height: 32px;
+            opacity: 0.85;
+            filter: sepia(0.2);
+        }
+
+        .topbar-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: 0.04em;
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .user-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.3rem 0.75rem;
+            background: var(--bg-raised);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-subtle);
+        }
+
+        .user-badge .dot {
+            width: 6px;
+            height: 6px;
+            background: var(--green-text);
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .logout-btn {
+            padding: 0.35rem 0.85rem;
+            background: transparent;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: border-color 0.2s, color 0.2s;
+            text-decoration: none;
+        }
+
+        .logout-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* ── Main ── */
+        .main {
+            position: relative;
+            z-index: 1;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2.5rem 2rem;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: baseline;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .section-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .section-count {
+            font-size: 0.75rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+        }
+
+        /* ── Shore cards grid ── */
+        .shores-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .shore-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .shore-card:hover {
+            border-color: var(--accent);
+            box-shadow: 0 4px 20px rgba(196, 166, 106, 0.08);
+        }
+
+        .shore-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+        }
+
+        .shore-name {
+            font-size: 0.95rem;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent);
+        }
+
+        .shore-status {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--green-text);
+        }
+
+        .shore-status .status-dot {
+            width: 5px;
+            height: 5px;
+            background: var(--green-text);
+            border-radius: 50%;
+        }
+
+        .shore-meta {
+            font-size: 0.72rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+            margin-bottom: 0.75rem;
+        }
+
+        .services-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+        }
+
+        .service-chip {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            background: var(--bg-overlay);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 0.72rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-subtle);
+            text-decoration: none;
+            transition: border-color 0.15s, color 0.15s;
+        }
+
+        .service-chip:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* ── Empty state ── */
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.4;
+        }
+
+        .empty-state h3 {
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+            color: var(--text-subtle);
+        }
+
+        .empty-state p {
+            font-size: 0.85rem;
+            font-family: 'JetBrains Mono', monospace;
+            opacity: 0.7;
+        }
+
+        /* ── Loading ── */
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin-bottom: 0.75rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .refresh-hint {
+            font-size: 0.7rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-muted);
+            text-align: center;
+            margin-top: 1rem;
+            opacity: 0.6;
+        }
+
+        @media (max-width: 600px) {
+            .topbar { padding: 0 1rem; }
+            .main { padding: 1.5rem 1rem; }
+            .shores-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <div class="topbar-brand">
+            <img class="topbar-logo" src="/static/dock-logo.png" alt="Hermit">
+            <span class="topbar-name">Hermit</span>
+        </div>
+        <div class="topbar-right">
+            <div class="user-badge">
+                <span class="dot"></span>
+                <span id="username-display">...</span>
+            </div>
+            <a href="/logout" class="logout-btn">Sign out</a>
+        </div>
+    </header>
+
+    <main class="main">
+        <div class="section-header">
+            <span class="section-title">Connected Shores</span>
+            <span class="section-count" id="shore-count"></span>
+        </div>
+
+        <div id="shores-container">
+            <div class="loading">
+                <div class="spinner"></div><br>
+                Loading shores…
+            </div>
+        </div>
+
+        <div class="refresh-hint">Auto-refreshes every 15s</div>
+    </main>
+
+    <script>
+        function timeSince(iso) {
+            const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+            if (diff < 60) return diff + 's ago';
+            if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+            return Math.floor(diff / 3600) + 'h ago';
+        }
+
+        function shoreNameShort(name) {
+            // "shore-master" → "master"
+            return name.replace(/^shore-/, '');
+        }
+
+        function renderShores(data) {
+            const container = document.getElementById('shores-container');
+            const countEl = document.getElementById('shore-count');
+
+            document.getElementById('username-display').textContent = data.user || '?';
+
+            const shores = data.shores || [];
+            countEl.textContent = shores.length + ' connected';
+
+            if (shores.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">⚓</div>
+                        <h3>No Shores connected</h3>
+                        <p>Start a Shore instance and point it at this Dock.</p>
+                    </div>`;
+                return;
+            }
+
+            const cards = shores.map(shore => {
+                const shortName = shoreNameShort(shore.name);
+                const services = (shore.services || []);
+                const serviceChips = services.map(svc =>
+                    `<a class="service-chip" href="/${shortName}/${svc}/">${svc}</a>`
+                ).join('');
+
+                return `
+                <div class="shore-card">
+                    <div class="shore-card-header">
+                        <span class="shore-name">${shore.name}</span>
+                        <span class="shore-status">
+                            <span class="status-dot"></span>online
+                        </span>
+                    </div>
+                    <div class="shore-meta">
+                        ping ${timeSince(shore.last_ping)} &nbsp;·&nbsp;
+                        connected ${timeSince(shore.connected)}
+                    </div>
+                    <div class="services-list">
+                        ${serviceChips || '<span style="font-size:0.72rem;color:var(--text-muted);font-family:\'JetBrains Mono\',monospace">no services</span>'}
+                    </div>
+                </div>`;
+            }).join('');
+
+            container.innerHTML = `<div class="shores-grid">${cards}</div>`;
+        }
+
+        async function loadShores() {
+            try {
+                const resp = await fetch('/api/shores');
+                if (!resp.ok) {
+                    if (resp.status === 401) {
+                        window.location.href = '/';
+                        return;
+                    }
+                    throw new Error('HTTP ' + resp.status);
+                }
+                const data = await resp.json();
+                renderShores(data);
+            } catch (err) {
+                document.getElementById('shores-container').innerHTML =
+                    `<div class="empty-state">
+                        <div class="empty-state-icon">⚠</div>
+                        <h3>Failed to load</h3>
+                        <p>${err.message}</p>
+                    </div>`;
+            }
+        }
+
+        loadShores();
+        setInterval(loadShores, 15000);
+    </script>
+</body>
+</html>

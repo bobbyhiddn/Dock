@@ -89,6 +89,7 @@ func (app *App) shoreConnectHandler(w http.ResponseWriter, r *http.Request) {
 	// ── Build and register the connection ─────────────────────────────────────
 	shore := &ShoreConnection{
 		Name:       shoreName,
+		Owner:      reg.Owner,
 		Conn:       conn,
 		Services:   reg.Services,
 		LastPing:   time.Now(),

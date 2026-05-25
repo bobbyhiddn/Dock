@@ -152,29 +152,39 @@ func (app *App) handleSSERequest(w http.ResponseWriter, r *http.Request,
 	}
 }
 
-// resolveShore maps a request URL path to a Shore connection.
+// resolveShore maps a request URL path to a Shore connection owned by the
+// authenticated user (extracted from request context via getUser).
 //
 // Routing rules:
-//   - /master/...  → shore-master  (stripPrefix = "master")
-//   - /tower/...   → shore-tower   (stripPrefix = "tower")
-//   - /            → default Shore (first alphabetically)
+//   - /master/...  → shore-master owned by user  (stripPrefix = "master")
+//   - /tower/...   → shore-tower owned by user   (stripPrefix = "tower")
+//   - /            → user's default Shore (lexicographically first among their Shores)
 //
-// The first path segment is treated as a short Shore name; the full Shore name
-// is "shore-" + segment.  If that Shore isn't connected, fall through to default.
+// Only Shores owned by the authenticated user are considered.
 func (app *App) resolveShore(r *http.Request) (*ShoreConnection, string) {
+	user := getUser(r)
+
 	trimmed := strings.TrimPrefix(r.URL.Path, "/")
 	if trimmed != "" {
 		parts := strings.SplitN(trimmed, "/", 2)
 		candidate := "shore-" + parts[0]
-		if shore, ok := app.registry.Get(candidate); ok {
+		if shore, ok := app.registry.GetByOwner(user, candidate); ok {
 			return shore, parts[0]
 		}
 	}
-	// Fall back to the default (lexicographically first) Shore.
-	if shore, ok := app.registry.Default(); ok {
-		return shore, ""
+
+	// Fall back to user's lexicographically first Shore.
+	userShores := app.registry.ListByOwner(user)
+	if len(userShores) == 0 {
+		return nil, ""
 	}
-	return nil, ""
+	var first *ShoreConnection
+	for _, s := range userShores {
+		if first == nil || s.Name < first.Name {
+			first = s
+		}
+	}
+	return first, ""
 }
 
 // writeHTTPResponse copies an HTTPResponseMessage back to the browser.

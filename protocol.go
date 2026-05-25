@@ -24,6 +24,7 @@ type TypedMessage struct {
 type RegisterMessage struct {
 	Type     string   `json:"type"`
 	Name     string   `json:"name"`
+	Owner    string   `json:"owner,omitempty"` // GitHub username or local username
 	Services []string `json:"services"`
 	Version  string   `json:"version,omitempty"`
 }

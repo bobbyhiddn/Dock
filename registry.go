@@ -14,6 +14,7 @@ const staleThreshold = 45 * time.Second
 // ShoreConnection represents one connected Shore instance.
 type ShoreConnection struct {
 	Name       string
+	Owner      string // username that owns this Shore (from RegisterMessage.Owner)
 	Conn       *websocket.Conn
 	Services   []string
 	LastPing   time.Time
@@ -207,6 +208,30 @@ func (r *ShoreRegistry) List() []*ShoreConnection {
 		out = append(out, s)
 	}
 	return out
+}
+
+// ListByOwner returns a snapshot of all Shores belonging to the given owner.
+func (r *ShoreRegistry) ListByOwner(owner string) []*ShoreConnection {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []*ShoreConnection
+	for _, s := range r.shores {
+		if s.Owner == owner {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// GetByOwner returns the named Shore if it is connected and owned by owner.
+func (r *ShoreRegistry) GetByOwner(owner, name string) (*ShoreConnection, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s, ok := r.shores[name]
+	if !ok || s.Owner != owner {
+		return nil, false
+	}
+	return s, true
 }
 
 // runReaper periodically removes Shores whose heartbeat has gone stale.
