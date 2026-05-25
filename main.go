@@ -5,22 +5,46 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"crypto/x509"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
+	"sort"
 	"time"
 )
 
 //go:embed static
 var staticFiles embed.FS
 
-// statusResponseWriter wraps http.ResponseWriter to capture the status code
+// App holds all shared state for the Dock gateway.
+type App struct {
+	registry      *ShoreRegistry
+	caCertPool    *x509.CertPool // nil if mTLS is not configured
+	sessionSecret []byte
+	sessionMaxAge time.Duration
+	cookieName    string
+	username      string
+	password      string
+}
+
+// ── Utility ──────────────────────────────────────────────────────────────────
+
+// generateID creates a random hex string suitable for request/stream IDs.
+func generateID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("generateID: rand.Read failed: %v", err))
+	}
+	return hex.EncodeToString(b)
+}
+
+// statusResponseWriter wraps http.ResponseWriter to capture the status code.
 type statusResponseWriter struct {
 	http.ResponseWriter
 	statusCode int
@@ -43,7 +67,7 @@ func (w *statusResponseWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
-// extractClientIP extracts the client IP from RemoteAddr (strips port)
+// extractClientIP strips the port from a RemoteAddr string.
 func extractClientIP(remoteAddr string) string {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
@@ -52,31 +76,27 @@ func extractClientIP(remoteAddr string) string {
 	return host
 }
 
-// loggingMiddleware logs every request with audit-relevant fields
+// ── Logging middleware ────────────────────────────────────────────────────────
+
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-
 		next.ServeHTTP(sw, r)
-
-		clientIP := extractClientIP(r.RemoteAddr)
-		xff := r.Header.Get("X-Forwarded-For")
-		ua := r.Header.Get("User-Agent")
-
 		log.Printf("AUDIT | %s | %s %s | src=%s | xff=%s | ua=%s | status=%d | dur=%s",
 			time.Now().UTC().Format(time.RFC3339),
 			r.Method, r.URL.Path,
-			clientIP,
-			xff,
-			ua,
+			extractClientIP(r.RemoteAddr),
+			r.Header.Get("X-Forwarded-For"),
+			r.Header.Get("User-Agent"),
 			sw.statusCode,
 			time.Since(start),
 		)
 	})
 }
 
-// generateSessionSecret creates a random 32-byte secret for HMAC signing
+// ── Session / auth ────────────────────────────────────────────────────────────
+
 func generateSessionSecret() []byte {
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
@@ -85,19 +105,16 @@ func generateSessionSecret() []byte {
 	return secret
 }
 
-// createSessionToken creates an HMAC-signed session token
-// Format: timestamp_hex.hmac_hex
+// createSessionToken creates an HMAC-signed session token (timestamp.hmac).
 func createSessionToken(secret []byte) string {
 	ts := fmt.Sprintf("%d", time.Now().Unix())
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(ts))
-	sig := hex.EncodeToString(mac.Sum(nil))
-	return ts + "." + sig
+	return ts + "." + hex.EncodeToString(mac.Sum(nil))
 }
 
-// validateSessionToken checks that the token is validly signed and not expired
+// validateSessionToken checks the HMAC signature and expiry of a session token.
 func validateSessionToken(token string, secret []byte, maxAge time.Duration) bool {
-	// Split into timestamp.signature
 	var ts, sig string
 	for i := len(token) - 1; i >= 0; i-- {
 		if token[i] == '.' {
@@ -109,179 +126,253 @@ func validateSessionToken(token string, secret []byte, maxAge time.Duration) boo
 	if ts == "" || sig == "" {
 		return false
 	}
-
-	// Verify HMAC
 	mac := hmac.New(sha256.New, secret)
 	mac.Write([]byte(ts))
-	expected := hex.EncodeToString(mac.Sum(nil))
-	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(hex.EncodeToString(mac.Sum(nil)))) != 1 {
 		return false
 	}
-
-	// Check expiry
 	var tsInt int64
 	fmt.Sscanf(ts, "%d", &tsInt)
-	issued := time.Unix(tsInt, 0)
-	if time.Since(issued) > maxAge {
-		return false
-	}
-
-	return true
+	return time.Since(time.Unix(tsInt, 0)) <= maxAge
 }
 
-func main() {
-	upstreamURL := os.Getenv("UPSTREAM_URL")
-	if upstreamURL == "" {
-		log.Fatal("UPSTREAM_URL environment variable is required")
-	}
-
-	password := os.Getenv("BASIC_AUTH_PASSWORD")
-	if password == "" {
-		log.Fatal("BASIC_AUTH_PASSWORD environment variable is required")
-	}
-
-	username := "micah"
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	// Session config
-	sessionSecret := generateSessionSecret()
-	sessionMaxAge := 24 * time.Hour * 7 // 7-day sessions
-	cookieName := "hermit_session"
-
-	target, err := url.Parse(upstreamURL)
-	if err != nil {
-		log.Fatalf("Invalid UPSTREAM_URL: %v", err)
-	}
-
-	proxy := httputil.NewSingleHostReverseProxy(target)
-
-	// Customize the director to rewrite Host and set forwarding headers.
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		clientIP := extractClientIP(req.RemoteAddr)
-		originalDirector(req)
-		req.Host = target.Host
-		req.Header.Set("X-Real-IP", clientIP)
-	}
-
-	// Custom error handler for upstream failures
-	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
-		clientIP := extractClientIP(r.RemoteAddr)
-		log.Printf("AUDIT | %s | PROXY_ERROR | src=%s | xff=%s | err=%v",
-			time.Now().UTC().Format(time.RFC3339),
-			clientIP,
-			r.Header.Get("X-Forwarded-For"),
-			err,
-		)
-		http.Error(w, "Upstream unreachable", http.StatusBadGateway)
-	}
-
-	// Read the login page from embedded static files
-	loginPage, err := staticFiles.ReadFile("static/login.html")
-	if err != nil {
-		log.Fatalf("Failed to read embedded login page: %v", err)
-	}
-
-	mux := http.NewServeMux()
-
-	// Health check endpoint (no auth required)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
-	})
-
-	// Serve static assets (logo, etc.) without auth — needed for login page
-	mux.Handle("/static/", http.FileServer(http.FS(staticFiles)))
-
-	// POST /login — validate credentials and set session cookie
-	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
+// requireSession is a middleware that gates routes behind the session/basic-auth check.
+func (app *App) requireSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cookie, err := r.Cookie(app.cookieName); err == nil {
+			if validateSessionToken(cookie.Value, app.sessionSecret, app.sessionMaxAge) {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
-
-		r.ParseForm()
-		user := r.FormValue("username")
-		pass := r.FormValue("password")
-
-		if subtle.ConstantTimeCompare([]byte(user), []byte(username)) != 1 ||
-			subtle.ConstantTimeCompare([]byte(pass), []byte(password)) != 1 {
-			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprintln(w, "invalid")
-			return
+		if user, pass, ok := r.BasicAuth(); ok {
+			if subtle.ConstantTimeCompare([]byte(user), []byte(app.username)) == 1 &&
+				subtle.ConstantTimeCompare([]byte(pass), []byte(app.password)) == 1 {
+				next.ServeHTTP(w, r)
+				return
+			}
 		}
-
-		// Credentials valid — set session cookie
-		token := createSessionToken(sessionSecret)
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    token,
-			Path:     "/",
-			MaxAge:   int(sessionMaxAge.Seconds()),
-			HttpOnly: true,
-			Secure:   true,
-			SameSite: http.SameSiteLaxMode,
-		})
-
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
-	})
-
-	// GET /logout — clear session cookie
-	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
-		http.SetCookie(w, &http.Cookie{
-			Name:     cookieName,
-			Value:    "",
-			Path:     "/",
-			MaxAge:   -1,
-			HttpOnly: true,
-			Secure:   true,
-			SameSite: http.SameSiteLaxMode,
-		})
-		http.Redirect(w, r, "/", http.StatusFound)
-	})
-
-	// Everything else goes through session check + proxy
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Check session cookie first
-		cookie, err := r.Cookie(cookieName)
-		if err == nil && validateSessionToken(cookie.Value, sessionSecret, sessionMaxAge) {
-			// Valid session — proxy the request
-			proxy.ServeHTTP(w, r)
-			return
-		}
-
-		// Also accept Basic auth (for API clients, curl, etc.)
-		user, pass, ok := r.BasicAuth()
-		if ok &&
-			subtle.ConstantTimeCompare([]byte(user), []byte(username)) == 1 &&
-			subtle.ConstantTimeCompare([]byte(pass), []byte(password)) == 1 {
-			proxy.ServeHTTP(w, r)
-			return
-		}
-
-		// Not authenticated — serve login page for browsers, 401 for API
+		// Unauthenticated — serve login page for browsers, 401 for API clients.
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			loginPage, _ := staticFiles.ReadFile("static/login.html")
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusOK)
 			w.Write(loginPage)
 			return
 		}
-
 		w.Header().Set("WWW-Authenticate", `Basic realm="hermit-dock"`)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	})
+}
 
-	// Wrap the entire mux with the logging middleware
+// ── Status endpoint ───────────────────────────────────────────────────────────
+
+type shoreStatus struct {
+	Name       string    `json:"name"`
+	Services   []string  `json:"services"`
+	Connected  time.Time `json:"connected"`
+	LastPing   time.Time `json:"last_ping"`
+	RemoteAddr string    `json:"remote_addr"`
+}
+
+func (app *App) statusHandler(w http.ResponseWriter, r *http.Request) {
+	shores := app.registry.List()
+	sort.Slice(shores, func(i, j int) bool {
+		return shores[i].Name < shores[j].Name
+	})
+	out := make([]shoreStatus, 0, len(shores))
+	for _, s := range shores {
+		out = append(out, shoreStatus{
+			Name:       s.Name,
+			Services:   s.Services,
+			Connected:  s.Connected,
+			LastPing:   s.LastPing,
+			RemoteAddr: s.RemoteAddr,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"shores": out,
+		"count":  len(out),
+	})
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+func main() {
+	// ── Config from environment ───────────────────────────────────────────────
+	password := os.Getenv("BASIC_AUTH_PASSWORD")
+	if password == "" {
+		log.Fatal("BASIC_AUTH_PASSWORD environment variable is required")
+	}
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	// UPSTREAM_URL is no longer required — Shores connect via WebSocket.
+	// Log a notice if it is set (it's ignored in v2).
+	if u := os.Getenv("UPSTREAM_URL"); u != "" {
+		log.Printf("NOTE: UPSTREAM_URL=%q is ignored in v2 (Shores connect via WebSocket)", u)
+	}
+
+	// Optional mTLS CA certificate.
+	var caCertPool *x509.CertPool
+	if caPath := os.Getenv("DOCK_CA_CERT"); caPath != "" {
+		pem, err := os.ReadFile(caPath)
+		if err != nil {
+			log.Fatalf("Failed to read DOCK_CA_CERT=%q: %v", caPath, err)
+		}
+		pool, err := parseCACert(pem)
+		if err != nil {
+			log.Fatalf("Failed to parse CA cert: %v", err)
+		}
+		caCertPool = pool
+		log.Printf("mTLS enabled — CA cert loaded from %s", caPath)
+	} else {
+		log.Printf("WARN: DOCK_CA_CERT not set — mTLS validation disabled for /shore/connect")
+	}
+
+	// Optional TLS for direct HTTPS (needed for mTLS in local dev).
+	tlsCert := os.Getenv("DOCK_TLS_CERT")
+	tlsKey := os.Getenv("DOCK_TLS_KEY")
+
+	app := &App{
+		registry:      NewShoreRegistry(),
+		caCertPool:    caCertPool,
+		sessionSecret: generateSessionSecret(),
+		sessionMaxAge: 7 * 24 * time.Hour,
+		cookieName:    "hermit_session",
+		username:      "micah",
+		password:      password,
+	}
+
+	// ── Read login page once ──────────────────────────────────────────────────
+	loginPage, err := staticFiles.ReadFile("static/login.html")
+	if err != nil {
+		log.Fatalf("Failed to read embedded login page: %v", err)
+	}
+
+	// ── HTTP mux ──────────────────────────────────────────────────────────────
+	mux := http.NewServeMux()
+
+	// Public endpoints (no auth).
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		shores := app.registry.List()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"status":"ok","shores":%d}`, len(shores))
+	})
+
+	mux.Handle("/static/", http.FileServer(http.FS(staticFiles)))
+
+	// Shore WebSocket endpoint — no user auth, but mTLS if configured.
+	mux.HandleFunc("/shore/connect", app.shoreConnectHandler)
+
+	// Auth endpoints.
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		r.ParseForm()
+		user := r.FormValue("username")
+		pass := r.FormValue("password")
+		if subtle.ConstantTimeCompare([]byte(user), []byte(app.username)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(pass), []byte(app.password)) != 1 {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprintln(w, "invalid")
+			return
+		}
+		token := createSessionToken(app.sessionSecret)
+		http.SetCookie(w, &http.Cookie{
+			Name:     app.cookieName,
+			Value:    token,
+			Path:     "/",
+			MaxAge:   int(app.sessionMaxAge.Seconds()),
+			HttpOnly: true,
+			Secure:   tlsCert != "",
+			SameSite: http.SameSiteLaxMode,
+		})
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "ok")
+	})
+
+	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     app.cookieName,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   tlsCert != "",
+			SameSite: http.SameSiteLaxMode,
+		})
+		http.Redirect(w, r, "/", http.StatusFound)
+	})
+
+	// Protected: Shore registry status.
+	mux.Handle("/status", app.requireSession(http.HandlerFunc(app.statusHandler)))
+
+	// Protected: everything else is proxied to a Shore.
+	mux.Handle("/", app.requireSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Serve the login page for the root path when no Shores are connected.
+		if r.URL.Path == "/" && len(app.registry.List()) == 0 {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			w.Write(loginPage)
+			return
+		}
+		app.routeToShore(w, r)
+	})))
+
 	handler := loggingMiddleware(mux)
 
+	// ── Start server ──────────────────────────────────────────────────────────
 	addr := ":" + port
-	log.Printf("hermit-dock proxy listening on %s, forwarding to %s", addr, upstreamURL)
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: handler,
 	}
+
+	if tlsCert != "" && tlsKey != "" {
+		srv.TLSConfig = buildTLSConfig(caCertPool)
+		log.Printf("hermit-dock v2 listening on %s (TLS, mTLS=%v)", addr, caCertPool != nil)
+		if err := srv.ListenAndServeTLS(tlsCert, tlsKey); err != nil {
+			log.Fatalf("Server failed: %v", err)
+		}
+	} else {
+		log.Printf("hermit-dock v2 listening on %s (plain HTTP — use TLS in production)", addr)
+		if err := srv.ListenAndServe(); err != nil {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}
+}
+
+// parseCACert parses a PEM-encoded CA certificate into an x509.CertPool.
+func parseCACert(pemData []byte) (*x509.CertPool, error) {
+	pool := x509.NewCertPool()
+	var found bool
+	for {
+		block, rest := pem.Decode(pemData)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, fmt.Errorf("parse certificate: %w", err)
+			}
+			pool.AddCert(cert)
+			found = true
+		}
+		pemData = rest
+	}
+	if !found {
+		return nil, fmt.Errorf("no certificates found in PEM data")
+	}
+	return pool, nil
 }
