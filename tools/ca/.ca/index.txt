@@ -1,0 +1,2 @@
+1|shore-master|shore-master|May 25 12:27:06 2027 GMT|/home/bobbyhiddn/Code/Dock/tools/ca/certs/shore-master/shore-master.crt
+2|shore-tower|shore-tower|May 25 12:27:07 2027 GMT|/home/bobbyhiddn/Code/Dock/tools/ca/certs/shore-tower/shore-tower.crt

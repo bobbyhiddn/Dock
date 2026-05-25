@@ -1,0 +1,6 @@
+# CA private key — NEVER commit this
+# Will be encrypted with SOPS/age in a future iteration
+.ca/ca.key
+
+# Shore private keys — also secret
+certs/*/*.key
