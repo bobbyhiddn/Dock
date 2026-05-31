@@ -261,6 +261,14 @@ func (app *App) apiShoresHandler(w http.ResponseWriter, r *http.Request) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 func main() {
+	// ── Version flag / subcommand — must be first ─────────────────────────────
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-version", "version":
+			printVersion()
+		}
+	}
+
 	// ── Config from environment ───────────────────────────────────────────────
 	port := os.Getenv("PORT")
 	if port == "" {

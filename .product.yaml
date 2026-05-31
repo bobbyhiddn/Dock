@@ -1,0 +1,7 @@
+# Product manifest — declares this repo's product attribution.
+# Required by PLM enforcement. Workers cannot commit without this file.
+product: Dock
+product_id: 109
+org: hermit-org
+repo: Dock
+description: Dock — Hermit federation edge gateway (Go binary hermit-dock); Cloudflare-fronted entry point routing to Shore and the prime services.
