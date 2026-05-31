@@ -1,3 +1,4 @@
 hermit-dock
 *.conf
 *.key
+local/
