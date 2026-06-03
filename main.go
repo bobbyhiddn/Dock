@@ -11,6 +11,7 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -140,6 +141,42 @@ func generateSessionSecret() []byte {
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
 		log.Fatalf("Failed to generate session secret: %v", err)
+	}
+	return secret
+}
+
+// loadSessionSecret resolves the session signing secret from the persistent
+// DOCK_SESSION_SECRET environment variable, falling back to an ephemeral
+// generated secret when it is unset. The secret HMAC-signs session cookies and
+// seeds the goth OAuth store; if it changes between process starts, every
+// existing session cookie is invalidated and users are bounced to re-login.
+// On Fly (auto-stop/start machines, redeploys) an ephemeral secret therefore
+// manifests as constantly "expiring" sessions — so a persistent secret is
+// required for stable sessions.
+//
+// The env value may be hex, base64-standard, or raw bytes. Hex is tried first
+// because it disambiguates cleanly: `openssl rand -hex 32` yields 64 chars in
+// [0-9a-f] (which hex decodes and base64 would mis-decode), whereas a base64
+// secret contains padding/+/ characters that hex.DecodeString rejects, falling
+// through to the base64 decoder.
+func loadSessionSecret() []byte {
+	raw := os.Getenv("DOCK_SESSION_SECRET")
+	if raw == "" {
+		log.Printf("WARNING: DOCK_SESSION_SECRET not set — generating an ephemeral session secret. ALL sessions will be invalidated on restart. Set DOCK_SESSION_SECRET (a persistent 32+ byte base64/hex value) as a Fly secret for stable sessions.")
+		return generateSessionSecret()
+	}
+
+	var secret []byte
+	if decoded, err := hex.DecodeString(raw); err == nil {
+		secret = decoded
+	} else if decoded, err := base64.StdEncoding.DecodeString(raw); err == nil {
+		secret = decoded
+	} else {
+		secret = []byte(raw)
+	}
+
+	if len(secret) < 32 {
+		log.Printf("WARNING: DOCK_SESSION_SECRET decoded to %d bytes (<32); using it anyway, but a 32+ byte secret is strongly recommended.", len(secret))
 	}
 	return secret
 }
@@ -344,7 +381,7 @@ func main() {
 		registry:      NewShoreRegistry(),
 		caCertPool:    caCertPool,
 		users:         users,
-		sessionSecret: generateSessionSecret(),
+		sessionSecret: loadSessionSecret(),
 		sessionMaxAge: 7 * 24 * time.Hour,
 		cookieName:    "hermit_session",
 	}
