@@ -15,11 +15,18 @@ const (
 	maxBodySize    = 10 * 1024 * 1024 // 10 MB
 )
 
+// activeShortCookieName is the cookie that remembers which Shore the user last
+// navigated to by path prefix. It is read by resolveShore to route un-prefixed
+// SPA sub-requests (assets, API calls) back to the same Shore.
+const activeShortCookieName = "hermit_active_shore"
+
 // routeToShore is the main handler for authenticated user requests.
 // It resolves which Shore to use, wraps the HTTP request as JSON, sends it
 // over the Shore's WebSocket, waits for the response, and writes it back.
 func (app *App) routeToShore(w http.ResponseWriter, r *http.Request) {
 	shore, stripPrefix := app.resolveShore(r)
+	// resolveShore returns nil when no Shore matches the path and no valid
+	// hermit_active_shore cookie is set; the landing page is served for "/".
 	if shore == nil {
 		if len(app.registry.List()) == 0 {
 			http.Error(w, "No Shores connected", http.StatusBadGateway)
@@ -27,6 +34,20 @@ func (app *App) routeToShore(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "No Shore available for this path", http.StatusBadGateway)
 		}
 		return
+	}
+
+	// When we matched by path prefix, pin the active Shore in a cookie so that
+	// subsequent un-prefixed SPA sub-requests (assets, API calls) are routed to
+	// the same Shore instead of falling through to an arbitrary one.
+	if stripPrefix != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     activeShortCookieName,
+			Value:    stripPrefix,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteLaxMode,
+		})
 	}
 
 	// Build the forwarded path (strip the shore-name prefix if present).
@@ -174,7 +195,8 @@ func (app *App) handleSSERequest(w http.ResponseWriter, r *http.Request,
 // Routing rules:
 //   - /master/...  → shore-master owned by user  (stripPrefix = "master")
 //   - /tower/...   → shore-tower owned by user   (stripPrefix = "tower")
-//   - /            → user's default Shore (lexicographically first among their Shores)
+//   - un-prefixed  → Shore named in hermit_active_shore cookie (if owned+connected)
+//   - no match     → nil, "" (caller serves an error; landing page handles bare "/")
 //
 // Only Shores owned by the authenticated user are considered.
 func (app *App) resolveShore(r *http.Request) (*ShoreConnection, string) {
@@ -189,18 +211,19 @@ func (app *App) resolveShore(r *http.Request) (*ShoreConnection, string) {
 		}
 	}
 
-	// Fall back to user's lexicographically first Shore.
-	userShores := app.registry.ListByOwner(user)
-	if len(userShores) == 0 {
-		return nil, ""
-	}
-	var first *ShoreConnection
-	for _, s := range userShores {
-		if first == nil || s.Name < first.Name {
-			first = s
+	// No path-prefix match. Consult the hermit_active_shore cookie to route
+	// un-prefixed SPA sub-requests (assets, API calls) back to the correct Shore.
+	// The lexicographic fallback has been intentionally removed — silent crossover
+	// between Shores was the root cause of SPA asset bleed between shore-master and
+	// shore-tower. The bare-root landing page ("/") is handled upstream by main.go
+	// and serves the dynamic shore picker, so returning nil here is correct.
+	if cookie, err := r.Cookie(activeShortCookieName); err == nil && cookie.Value != "" {
+		candidate := "shore-" + cookie.Value
+		if shore, ok := app.registry.GetByOwner(user, candidate); ok {
+			return shore, "" // un-prefixed request; nothing to strip
 		}
 	}
-	return first, ""
+	return nil, ""
 }
 
 // writeHTTPResponse copies an HTTPResponseMessage back to the browser.
