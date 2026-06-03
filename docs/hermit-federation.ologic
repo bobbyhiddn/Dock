@@ -1,0 +1,332 @@
+# Hermit Federation — Ordinal Diagramming Model
+#
+# This model captures the Dock → Shore → Prime three-tier federation.
+# It is COMPLEMENTARY to Hermetic/models/hermetic-architecture.ologic,
+# which models the internals of the Hermetic Go binary (Prime-scoped).
+# That model is NOT duplicated here.
+#
+# Ontology level: NETWORK
+#   Two host FACTORIES (masternode, tower), each containing:
+#     - Shore machine (SOC server + DockClient)
+#     - One or more Prime machines (agent + DB)
+#     - A standalone SOC-hub node that cross-connects all machines in the
+#       factory (triggers factory detection).
+#   Network-level: Dock gateway node with inputs from both factories
+#     (triggers network detection).
+#
+# Requirements traced inline (REQ-FED-*):
+#   REQ-FED-DOCK-001: Dock MUST be the sole public entry point for all
+#     federation traffic; no host needs inbound ports.
+#   REQ-FED-MTLS-001: Shore identity MUST be established by mTLS cert CN;
+#     the register-frame name is advisory only.
+#   REQ-FED-SHORE-001: Each host MUST run exactly one Shore instance that
+#     serves as the L2 control plane and SOC for all Primes on that host.
+#   REQ-FED-PRIME-001: Primes MUST register to their host Shore; Shore
+#     propagates the updated service list to Dock live (no reconnect).
+#   REQ-FED-OAUTH-001: Human users MUST authenticate via GitHub OAuth
+#     before any Shore or Prime is reachable.
+#   REQ-FED-CA-001: Hermit Platform CA MUST issue all Shore client certs;
+#     Dock verifies against the CA root on every mTLS handshake.
+#   REQ-FED-NAV-001: Dock landing MUST render a Shore card per connected
+#     Shore; clicking a card MUST navigate to that Shore's SOC.
+#   REQ-FED-NAV-002: Shore SOC MUST be served at the Shore's path root
+#     (/<shortname>/) so it is the first thing operators see on that host.
+#   REQ-FED-NAV-003: Proxied Prime dashboards MUST resolve assets and API
+#     calls correctly under their path prefix (base-path rewrite).
+#
+# To validate visually: load this file in Ordinal or call
+#   render_canvas / reconcile_requirements via Hermetic MCP tooling.
+
+name: Hermit Federation Architecture
+version: "2.0"
+description: >
+  The Hermit federation connects a public Dock gateway (Fly.io DFW) to
+  per-host Shore control planes over outbound mTLS WebSocket tunnels.
+  Each Shore hosts one or more Prime agent dashboards. Human users reach
+  the federation via GitHub OAuth at hermit-dock.com.
+
+logic:
+  mode: diagramming
+  version: '2.0'
+
+  networks:
+    - id: hermit-federation
+      title: Hermit Federation
+
+      factories:
+
+        # ══════════════════════════════════════════════════════════════
+        # FACTORY: masternode
+        # Host: masternode (bobbyhiddn)
+        # Shore: shore-master — services [rhode, shell]
+        # ══════════════════════════════════════════════════════════════
+        - id: masternode-factory
+          title: masternode (bobbyhiddn)
+
+          machines:
+
+            # ── Shore-master (L2 Control Plane) ──────────────────────
+            # src/shore/server.py (Starlette :7778)
+            # src/shore/dock_client.py (outbound WSS to Dock :8443)
+            - id: shore-master-machine
+              title: Shore-master Control Plane
+              nodes:
+                - id: shore-master-soc
+                  type: orchestrator
+                  title: "Shore-master SOC (Starlette :7778)"
+                  description: >
+                    Shore's Starlette HTTP server. Serves the Svelte SOC dashboard
+                    (ui/dist), /api/* routes, reverse-proxy routes for each Prime.
+                    Owns ServiceRegistry (seeded from [proxies] config; extended at
+                    runtime via POST /api/dock/services/register) and PrimeRegistry
+                    (scans /etc/hermetic/primes.d/ and ~/.hermetic/primes.d/).
+                    Source: src/shore/server.py
+                  requirements:
+                    - REQ-FED-SHORE-001
+                    - REQ-FED-NAV-002
+                  outputs: [dock-client-master]
+
+                - id: dock-client-master
+                  type: process
+                  title: "DockClient (outbound mTLS WSS)"
+                  description: >
+                    Connects outbound to wss://hermit-dock.com:8443/shore/connect.
+                    Presents shore.crt (CN=shore-master); verifies Dock server cert
+                    against hermit-ca.crt. Sends register frame once on connect, then
+                    handles http_request / stream_start messages by proxying locally.
+                    Heartbeat: ping every 15 s. Reconnect: exponential backoff 5→60 s.
+                    Source: src/shore/dock_client.py:_connect_and_run, _register
+                  requirements:
+                    - REQ-FED-MTLS-001
+                    - REQ-FED-SHORE-001
+
+            # ── Rhode Prime (L3 Agent) ────────────────────────────────
+            # Rhode agent service at :7777
+            - id: rhode-machine
+              title: Rhode Prime (:7777)
+              nodes:
+                - id: rhode-prime
+                  type: ai
+                  title: "Rhode Prime (agent runtime :7777)"
+                  description: >
+                    Rhode agent service. Dashboard at :7777. Proxied by Shore-master
+                    under /rhode/ with rewrite_rules that fix absolute asset paths
+                    and API base URL (server.py:346-362). Registered to Shore via
+                    [proxies] config (rhode = "http://127.0.0.1:7777").
+                  requirements:
+                    - REQ-FED-PRIME-001
+                    - REQ-FED-NAV-003
+                  outputs: [rhode-db]
+
+                - id: rhode-db
+                  type: database
+                  title: "Rhode SQLite (rhode.db)"
+                  description: >
+                    Rhode's persistent store. tasks, task_messages, workers,
+                    wake_points, bus_messages tables. WAL mode.
+
+            # ── Gitea / Shell (L3 Service) ────────────────────────────
+            - id: gitea-master-machine
+              title: Gitea / Shell (:3000)
+              nodes:
+                - id: gitea-master
+                  type: server
+                  title: "Gitea (git + shell UI :3000)"
+                  description: >
+                    Self-hosted Gitea git server. Proxied by Shore-master under
+                    /shell/ with injected X-Forwarded-Proto and X-Forwarded-Host
+                    headers so Gitea generates correct redirect URLs.
+                    Source: server.py:363-373
+                  requirements:
+                    - REQ-FED-NAV-003
+                  outputs: [gitea-master-db]
+
+                - id: gitea-master-db
+                  type: database
+                  title: "Gitea SQLite (gitea.db)"
+
+          # ── Factory-level standalone: SOC hub ─────────────────────
+          # inputs: [all machines] creates the cross-machine connections
+          # that trigger factory detection for masternode-factory.
+          nodes:
+            - id: masternode-soc-hub
+              type: process
+              title: "SOC Hub — service routing (masternode)"
+              description: >
+                The Shore SOC routes browser requests to the correct Prime.
+                A click on a SOC tile → /<shortname>/<service>/ → Dock strips
+                the shortname prefix, sends http_request to Shore over the
+                mTLS tunnel → Shore _route() strips /<service>/ prefix →
+                upstream Prime. This node represents the routing seam that
+                binds the Shore control plane to its Primes.
+              requirements:
+                - REQ-FED-SHORE-001
+                - REQ-FED-NAV-002
+                - REQ-FED-NAV-003
+              inputs: [shore-master-machine, rhode-machine, gitea-master-machine]
+
+
+        # ══════════════════════════════════════════════════════════════
+        # FACTORY: tower (the-tower / Cap)
+        # Host: the-tower (Cap, ssh alias hermitos)
+        # Shore: shore-tower — services [hermetic, shell]
+        # ══════════════════════════════════════════════════════════════
+        - id: tower-factory
+          title: tower / the-tower (Cap)
+
+          machines:
+
+            # ── Shore-tower (L2 Control Plane) ───────────────────────
+            - id: shore-tower-machine
+              title: Shore-tower Control Plane
+              nodes:
+                - id: shore-tower-soc
+                  type: orchestrator
+                  title: "Shore-tower SOC (Starlette :7778)"
+                  description: >
+                    Shore SOC for the-tower. Same architecture as shore-master.
+                    Proxies hermetic (→:7780) and shell (→:3000).
+                    Registered services: ["hermetic", "shell"].
+                  requirements:
+                    - REQ-FED-SHORE-001
+                    - REQ-FED-NAV-002
+                  outputs: [dock-client-tower]
+
+                - id: dock-client-tower
+                  type: process
+                  title: "DockClient (outbound mTLS WSS)"
+                  description: >
+                    Shore-tower's outbound connector. Cert CN = shore-tower.
+                    Connects to wss://hermit-dock.com:8443/shore/connect.
+                    Same protocol as shore-master's DockClient.
+                  requirements:
+                    - REQ-FED-MTLS-001
+
+            # ── Hermetic Prime (L3 Agent) ─────────────────────────────
+            # Hermetic Go binary at :7780
+            # Internal architecture: see Hermetic/models/hermetic-architecture.ologic
+            - id: hermetic-machine
+              title: Hermetic Prime (:7780)
+              nodes:
+                - id: hermetic-prime
+                  type: ai
+                  title: "Hermetic Prime (agent runtime :7780)"
+                  description: >
+                    Hermetic Go binary — MCP server (Hermes/Nous/Eidolon layers,
+                    guardrail PDP). Dashboard at :7780. Proxied by Shore-tower
+                    under /hermetic/. For internals see the companion model at
+                    Hermetic/models/hermetic-architecture.ologic.
+                  requirements:
+                    - REQ-FED-PRIME-001
+                    - REQ-FED-NAV-003
+                  outputs: [hermetic-db]
+
+                - id: hermetic-db
+                  type: database
+                  title: "Hermetic SQLite (hermetic.db)"
+                  description: >
+                    Hermetic's single shared SQLite DB (WAL). Schema: tasks,
+                    bus_messages, dispatches, workers, director_memories,
+                    products, milestones, projects, requirements.
+
+            # ── Gitea / Shell (tower) ─────────────────────────────────
+            - id: gitea-tower-machine
+              title: Gitea / Shell tower (:3000)
+              nodes:
+                - id: gitea-tower
+                  type: server
+                  title: "Gitea (git + shell UI :3000)"
+                  description: >
+                    Self-hosted Gitea on the-tower. Proxied under /shell/.
+                  requirements:
+                    - REQ-FED-NAV-003
+                  outputs: [gitea-tower-db]
+
+                - id: gitea-tower-db
+                  type: database
+                  title: "Gitea SQLite (gitea.db)"
+
+          # ── Factory-level standalone: SOC hub (tower) ─────────────
+          nodes:
+            - id: tower-soc-hub
+              type: process
+              title: "SOC Hub — service routing (tower)"
+              description: >
+                Same routing seam as masternode-soc-hub. Shore-tower routes
+                browser requests to hermetic or shell. The base-path rewrite
+                fix (task #43897) ensures Hermetic's SPA dashboard loads
+                correctly under /tower/hermetic/.
+              requirements:
+                - REQ-FED-SHORE-001
+                - REQ-FED-NAV-002
+                - REQ-FED-NAV-003
+              inputs: [shore-tower-machine, hermetic-machine, gitea-tower-machine]
+
+
+      # ════════════════════════════════════════════════════════════════
+      # NETWORK-LEVEL NODES
+      # These cross-factory entities trigger network detection.
+      # ════════════════════════════════════════════════════════════════
+      nodes:
+
+        # ── Dock gateway ─────────────────────────────────────────────
+        # Receives Shore tunnel connections from both host factories.
+        # inputs: [factory-id] → triggers network detection.
+        - id: dock-gateway
+          type: gateway
+          title: "Dock (hermit-dock.com, Fly.io DFW :8080/:8443)"
+          description: >
+            Federation directory and identity gateway.
+            :8080 — browser/OAuth traffic; Fly edge terminates TLS.
+              Serves static/landing.html (Shore card grid) at /.
+              Routes /<shortname>/... to Shore over WS tunnel.
+            :8443 — mTLS raw TCP passthrough (fly.toml handlers=[]).
+              App presents Hermit-CA-signed server cert.
+              Validates Shore client certs via x509.Verify + caCertPool.
+              Shore cert CN overrides register-frame name (shore_handler.go:76-82).
+            ShoreRegistry: in-memory map name→ShoreConnection (registry.go).
+            Reaper: removes stale Shores after 45 s of no pings (registry.go:12).
+            routing: resolveShore strips "shore-" from path prefix (gateway.go:171).
+            Source: main.go, gateway.go, registry.go, shore_handler.go
+          requirements:
+            - REQ-FED-DOCK-001
+            - REQ-FED-MTLS-001
+            - REQ-FED-NAV-001
+          inputs: [masternode-factory, tower-factory]
+
+        # ── Hermit Platform CA ────────────────────────────────────────
+        # Offline CA — issues Shore client certs and Dock server cert.
+        # Not in the live request path; referenced by mTLS validation.
+        - id: hermit-ca
+          type: firewall
+          title: "Hermit Platform CA (tools/ca/ca.sh)"
+          description: >
+            Private certificate authority. Private key lives in
+            tools/ca/.ca/ca.key (never committed; encrypted if exported).
+            Issuing commands:
+              ca.sh init       — generate CA key + self-signed cert (10 yr)
+              ca.sh issue --name shore-master   — client cert, CN=shore-master
+              ca.sh issue --name shore-tower    — client cert, CN=shore-tower
+            Cert fields: O=Hermit, OU=Shore, valid 1 year.
+            CA root deployed to Dock as DOCK_CA_CERT env secret (Fly).
+            Shore copies ca.crt to ~/.hermetic/certs/hermit-ca.crt.
+            Source: Dock/tools/ca/ca.sh
+          requirements:
+            - REQ-FED-CA-001
+
+        # ── GitHub OAuth ──────────────────────────────────────────────
+        # External identity provider for human user authentication.
+        - id: github-oauth
+          type: api
+          title: "GitHub OAuth (markbates/goth)"
+          description: >
+            Human user auth. Flow: GET /auth/github → GitHub consent
+            → GET /auth/github/callback → goth.CompleteUserAuth →
+            GetByProvider / CreateUser → setSessionCookie (7-day HMAC).
+            Client ID: Ov23lik5jCeUVPSFl1dH (GOTH_GITHUB_KEY env).
+            NOT Cloudflare Access — CF (if present) is pure transport.
+            User→Shore isolation: GetByOwner(user, name) ensures users
+            can only reach their own Shores (registry.go:226-235).
+            Source: main.go:352-556, users.go
+          requirements:
+            - REQ-FED-OAUTH-001
