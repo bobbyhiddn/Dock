@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -45,6 +46,21 @@ func (app *App) routeToShore(w http.ResponseWriter, r *http.Request) {
 	headers["X-Real-IP"] = extractClientIP(r.RemoteAddr)
 	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
 		headers["X-Forwarded-For"] = fwd
+	}
+
+	// Strip any client-supplied identity headers to prevent spoofing.
+	// flattenHeaders preserves Go's canonical casing, but iterate defensively.
+	for k := range headers {
+		switch strings.ToLower(k) {
+		case "x-dock-user", "x-dock-email", "x-dock-provider":
+			delete(headers, k)
+		}
+	}
+	// Inject the Dock-authenticated user identity into the forwarded frame.
+	// Plaintext is safe here — the mTLS tunnel is the cryptographic trust boundary.
+	if user := getUser(r); user != "" {
+		headers["X-Dock-User"] = user
+		log.Printf("FORWARD | shore=%s | user=%s", shore.Name, user)
 	}
 
 	reqID := generateID()
