@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
@@ -90,6 +92,18 @@ func (w *statusResponseWriter) Write(b []byte) (int, error) {
 		w.written = true
 	}
 	return w.ResponseWriter.Write(b)
+}
+
+// Hijack delegates to the underlying ResponseWriter so WebSocket upgrades
+// (e.g. /shore/connect) work through the logging middleware. Without this,
+// the wrapped writer hides the http.Hijacker interface and upgrades fail with
+// "response does not implement http.Hijacker".
+func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hj.Hijack()
 }
 
 // extractClientIP strips the port from a RemoteAddr string.
@@ -280,19 +294,27 @@ func main() {
 		log.Printf("NOTE: UPSTREAM_URL=%q is ignored in v2 (Shores connect via WebSocket)", u)
 	}
 
-	// Optional mTLS CA certificate.
+	// Optional mTLS CA certificate. DOCK_CA_CERT may be either an inline PEM
+	// (the natural form for a Fly/env secret) or a filesystem path to a PEM file.
 	var caCertPool *x509.CertPool
-	if caPath := os.Getenv("DOCK_CA_CERT"); caPath != "" {
-		pemData, err := os.ReadFile(caPath)
-		if err != nil {
-			log.Fatalf("Failed to read DOCK_CA_CERT=%q: %v", caPath, err)
+	if caVal := os.Getenv("DOCK_CA_CERT"); caVal != "" {
+		var pemData []byte
+		if strings.Contains(caVal, "BEGIN CERTIFICATE") {
+			pemData = []byte(caVal)
+			log.Printf("mTLS enabled — CA cert loaded from inline DOCK_CA_CERT PEM")
+		} else {
+			data, err := os.ReadFile(caVal)
+			if err != nil {
+				log.Fatalf("Failed to read DOCK_CA_CERT path %q: %v", caVal, err)
+			}
+			pemData = data
+			log.Printf("mTLS enabled — CA cert loaded from %s", caVal)
 		}
 		pool, err := parseCACert(pemData)
 		if err != nil {
 			log.Fatalf("Failed to parse CA cert: %v", err)
 		}
 		caCertPool = pool
-		log.Printf("mTLS enabled — CA cert loaded from %s", caPath)
 	} else {
 		log.Printf("WARN: DOCK_CA_CERT not set — mTLS validation disabled for /shore/connect")
 	}
@@ -300,7 +322,16 @@ func main() {
 	// Optional TLS for direct HTTPS (needed for mTLS in local dev).
 	tlsCert := os.Getenv("DOCK_TLS_CERT")
 	tlsKey := os.Getenv("DOCK_TLS_KEY")
-	secureCookies := tlsCert != ""
+	// Behind an edge that terminates TLS (Fly.io, Cloudflare) the app speaks
+	// plaintext internally but is served over HTTPS, so cookies must be Secure
+	// and OAuth callbacks must use https. Treat a real DOCK_HOST (non-localhost)
+	// as TLS-terminated, or honor an explicit DOCK_SECURE override.
+	dockHost := os.Getenv("DOCK_HOST")
+	tlsTerminated := dockHost != "" && !strings.HasPrefix(dockHost, "localhost") && !strings.HasPrefix(dockHost, "127.0.0.1")
+	if v := strings.ToLower(os.Getenv("DOCK_SECURE")); v == "true" || v == "1" || v == "yes" {
+		tlsTerminated = true
+	}
+	secureCookies := tlsCert != "" || tlsTerminated
 
 	// ── User store (SQLite) ───────────────────────────────────────────────────
 	users, err := NewUserStore(userStoreDBPath())
@@ -460,6 +491,13 @@ func main() {
 			return
 		}
 
+		// Goth's GetProviderName looks for the provider in a ?provider= query
+		// param, a gorilla/chi route var, or the request context — none of which
+		// our stdlib "/auth/" prefix match sets. Without this, BeginAuthHandler
+		// and CompleteUserAuth both fall through to "you must select a provider".
+		// Inject the provider parsed from the path so both branches can find it.
+		r = r.WithContext(context.WithValue(r.Context(), gothic.ProviderParamKey, parts[0]))
+
 		if len(parts) >= 2 && parts[1] == "callback" {
 			// Completion callback from OAuth provider.
 			gothUser, err := gothic.CompleteUserAuth(w, r)
@@ -546,25 +584,69 @@ func main() {
 
 	handler := loggingMiddleware(mux)
 
-	// ── Start server ──────────────────────────────────────────────────────────
+	// ── Start servers ─────────────────────────────────────────────────────────
+	// Two listeners with different TLS postures:
+	//   • PORT (plain HTTP): browser/OAuth traffic. Sits behind an edge that
+	//     terminates TLS with a publicly-trusted cert (Fly.io / Cloudflare).
+	//   • MTLS_PORT (Dock-terminated TLS + client-cert request): Shore WebSocket
+	//     mTLS. The edge must forward raw TCP here (no edge TLS) so the app sees
+	//     the Shore client certificate. Shore validates Dock's server cert
+	//     against the Hermit CA, so that server cert must be Hermit-CA-signed.
 	addr := ":" + port
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: handler,
+	errCh := make(chan error, 2)
+
+	go func() {
+		srv := &http.Server{Addr: addr, Handler: handler}
+		log.Printf("hermit-dock v2 listening on %s (plain HTTP — edge TLS termination expected)", addr)
+		errCh <- srv.ListenAndServe()
+	}()
+
+	mtlsPort := os.Getenv("MTLS_PORT")
+	if mtlsPort == "" {
+		mtlsPort = "8443"
+	}
+	serverCert, certErr := loadServerCert(tlsCert, tlsKey)
+	if certErr == nil && caCertPool != nil {
+		go func() {
+			tlsCfg := buildTLSConfig(caCertPool)
+			tlsCfg.Certificates = []tls.Certificate{serverCert}
+			// WebSocket upgrade requires HTTP/1.1; disable h2 ALPN on this listener.
+			tlsCfg.NextProtos = []string{"http/1.1"}
+			srv := &http.Server{Addr: ":" + mtlsPort, Handler: handler, TLSConfig: tlsCfg}
+			log.Printf("hermit-dock v2 mTLS listening on :%s (Shore client-cert)", mtlsPort)
+			errCh <- srv.ListenAndServeTLS("", "")
+		}()
+	} else {
+		log.Printf("WARN: mTLS listener DISABLED (server-cert err=%v, caPool=%v) — Shores cannot connect", certErr, caCertPool != nil)
 	}
 
-	if tlsCert != "" && tlsKey != "" {
-		srv.TLSConfig = buildTLSConfig(caCertPool)
-		log.Printf("hermit-dock v2 listening on %s (TLS, mTLS=%v)", addr, caCertPool != nil)
-		if err := srv.ListenAndServeTLS(tlsCert, tlsKey); err != nil {
-			log.Fatalf("Server failed: %v", err)
-		}
-	} else {
-		log.Printf("hermit-dock v2 listening on %s (plain HTTP — use TLS in production)", addr)
-		if err := srv.ListenAndServe(); err != nil {
-			log.Fatalf("Server failed: %v", err)
-		}
+	log.Fatalf("Server exited: %v", <-errCh)
+}
+
+// loadServerCert builds the Dock TLS server certificate from DOCK_TLS_CERT /
+// DOCK_TLS_KEY, each of which may be an inline PEM (Fly/env secret) or a path.
+func loadServerCert(certVal, keyVal string) (tls.Certificate, error) {
+	if certVal == "" || keyVal == "" {
+		return tls.Certificate{}, fmt.Errorf("DOCK_TLS_CERT/DOCK_TLS_KEY not set")
 	}
+	certPEM, err := pemValueOrFile(certVal)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("read DOCK_TLS_CERT: %w", err)
+	}
+	keyPEM, err := pemValueOrFile(keyVal)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("read DOCK_TLS_KEY: %w", err)
+	}
+	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// pemValueOrFile returns the value as inline PEM bytes if it looks like a PEM
+// block, otherwise treats it as a filesystem path and reads it.
+func pemValueOrFile(v string) ([]byte, error) {
+	if strings.Contains(v, "BEGIN ") {
+		return []byte(v), nil
+	}
+	return os.ReadFile(v)
 }
 
 // parseCACert parses a PEM-encoded CA certificate into an x509.CertPool.

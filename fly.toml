@@ -5,13 +5,16 @@ primary_region = "dfw"
 
 [env]
   PORT = "8080"
+  MTLS_PORT = "8443"
 
+# Browser / OAuth traffic — Fly terminates TLS at the edge (publicly-trusted cert).
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  # Gateway holds persistent Shore WebSocket tunnels — must stay up.
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [[http_service.checks]]
   grace_period = "5s"
@@ -19,6 +22,17 @@ primary_region = "dfw"
   method = "GET"
   path = "/healthz"
   timeout = "5s"
+
+# Shore mTLS — raw TCP passthrough (handlers = []) so the app terminates TLS
+# itself and can request+verify the Shore client certificate. Fly does NOT
+# touch TLS here; Dock presents a Hermit-CA-signed server cert on :8443.
+[[services]]
+  protocol = "tcp"
+  internal_port = 8443
+
+  [[services.ports]]
+    port = 8443
+    handlers = []
 
 [[vm]]
   size = "shared-cpu-1x"
