@@ -181,6 +181,26 @@
             box-shadow: 0 4px 20px rgba(196, 166, 106, 0.08);
         }
 
+        /* Clickable link wrapping the card header + meta */
+        .shore-card-link {
+            display: block;
+            text-decoration: none;
+            color: inherit;
+            cursor: pointer;
+            margin: -1.25rem -1.25rem 0.75rem -1.25rem;
+            padding: 1.25rem 1.25rem 0 1.25rem;
+            border-radius: 12px 12px 0 0;
+            transition: background 0.15s;
+        }
+
+        .shore-card-link:hover {
+            background: rgba(196, 166, 106, 0.06);
+        }
+
+        .shore-card-link:hover .shore-name {
+            color: var(--accent-hover);
+        }
+
         .shore-card-header {
             display: flex;
             align-items: center;
@@ -380,16 +400,18 @@
 
                 return `
                 <div class="shore-card">
-                    <div class="shore-card-header">
-                        <span class="shore-name">${shore.name}</span>
-                        <span class="shore-status">
-                            <span class="status-dot"></span>online
-                        </span>
-                    </div>
-                    <div class="shore-meta">
-                        ping ${timeSince(shore.last_ping)} &nbsp;·&nbsp;
-                        connected ${timeSince(shore.connected)}
-                    </div>
+                    <a class="shore-card-link" href="/${shortName}/" title="Open ${shore.name} dashboard">
+                        <div class="shore-card-header">
+                            <span class="shore-name">${shore.name}</span>
+                            <span class="shore-status">
+                                <span class="status-dot"></span>online
+                            </span>
+                        </div>
+                        <div class="shore-meta">
+                            ping ${timeSince(shore.last_ping)} &nbsp;·&nbsp;
+                            connected ${timeSince(shore.connected)}
+                        </div>
+                    </a>
                     <div class="services-list">
                         ${serviceChips || '<span style="font-size:0.72rem;color:var(--text-muted);font-family:\'JetBrains Mono\',monospace">no services</span>'}
                     </div>
